@@ -3001,21 +3001,22 @@ static int drmProcessPciDevice(drmDevicePtr *device, const char *d_name,
 {
     const int max_node_str = drmGetMaxNodeName();
     int ret, i;
-    void *addr;
+    char *addr;
 
-    addr = *device = calloc(1, sizeof(drmDevice) +
-                               (DRM_NODE_MAX *
-                                (sizeof(void *) + max_node_str)) +
-                               sizeof(drmPciBusInfo) +
-                               sizeof(drmPciDeviceInfo));
+    *device = calloc(1, sizeof(drmDevice) +
+		     (DRM_NODE_MAX * (sizeof(void *) + max_node_str)) +
+		     sizeof(drmPciBusInfo) +
+		     sizeof(drmPciDeviceInfo));
     if (!*device)
         return -ENOMEM;
 
+    addr = (char*)*device;
+  
     (*device)->bustype = DRM_BUS_PCI;
     (*device)->available_nodes = 1 << node_type;
 
     addr += sizeof(drmDevice);
-    (*device)->nodes = addr;
+    (*device)->nodes = (char**)addr;
 
     addr += DRM_NODE_MAX * sizeof(void *);
     for (i = 0; i < DRM_NODE_MAX; i++) {
@@ -3024,7 +3025,7 @@ static int drmProcessPciDevice(drmDevicePtr *device, const char *d_name,
     }
     memcpy((*device)->nodes[node_type], node, max_node_str);
 
-    (*device)->businfo.pci = addr;
+    (*device)->businfo.pci = (drmPciBusInfoPtr)addr;
 
     ret = drmParsePciBusInfo(maj, min, (*device)->businfo.pci);
     if (ret)
@@ -3033,7 +3034,7 @@ static int drmProcessPciDevice(drmDevicePtr *device, const char *d_name,
     // Fetch the device info if the user has requested it
     if (fetch_deviceinfo) {
         addr += sizeof(drmPciBusInfo);
-        (*device)->deviceinfo.pci = addr;
+        (*device)->deviceinfo.pci = (drmPciDeviceInfoPtr)addr;
 
         ret = drmParsePciDeviceInfo(d_name, (*device)->deviceinfo.pci);
         if (ret)
@@ -3107,7 +3108,7 @@ int drmGetDevice(int fd, drmDevicePtr *device)
     sysdir = opendir(DRM_DIR_NAME);
     if (!sysdir) {
         ret = -errno;
-        goto close_sysdir;
+        goto free_locals;
     }
 
     i = 0;
@@ -3139,7 +3140,7 @@ int drmGetDevice(int fd, drmDevicePtr *device)
             break;
         default:
             fprintf(stderr, "The subsystem type is not supported yet\n");
-            break;
+            continue;
         }
 
         if (i >= max_count) {
@@ -3164,16 +3165,16 @@ int drmGetDevice(int fd, drmDevicePtr *device)
     for (i = 1; i < node_count && local_devices[i]; i++)
             drmFreeDevice(&local_devices[i]);
 
-    free(local_devices);
     closedir(sysdir);
+    free(local_devices);
     return 0;
 
 free_devices:
     drmFreeDevices(local_devices, i);
-    free(local_devices);
-
-close_sysdir:
     closedir(sysdir);
+
+free_locals:
+    free(local_devices);
     return ret;
 }
 
@@ -3243,7 +3244,7 @@ int drmGetDevices(drmDevicePtr devices[], int max_devices)
             break;
         default:
             fprintf(stderr, "The subsystem type is not supported yet\n");
-            break;
+            continue;
         }
 
         if (i >= max_count) {
